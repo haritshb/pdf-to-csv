@@ -3,6 +3,7 @@
 namespace App\Http\Controllers;
 
 use Illuminate\Http\Request;
+use File;
 
 class FileUploadController extends Controller
 {
@@ -35,7 +36,7 @@ class FileUploadController extends Controller
 
         // Create URL
         $url = "https://api.pdf.co/v1/file/upload/get-presigned-url" . 
-            "?name=" . $request->file('file')->getClientOriginalName() .
+            "?name=" . $request->file('fileInput')->getClientOriginalName() .
             "&contenttype=application/octet-stream";
             
         // Create request
@@ -46,8 +47,8 @@ class FileUploadController extends Controller
         curl_setopt($curl, CURLOPT_SSL_VERIFYPEER, false); //for solving certificate issue laravel
 
         // Execute request
-        $result = curl_exec($curl);
-
+        $result = curl_exec($curl); // sukses response
+        
         if (curl_errno($curl) == 0)
         {
             $status_code = curl_getinfo($curl, CURLINFO_HTTP_CODE);
@@ -63,7 +64,7 @@ class FileUploadController extends Controller
                 
                 // 2. UPLOAD THE FILE TO CLOUD.
                 
-                $localFile = $request->file('file');//$_FILES["fileInput"]["tmp_name"];
+                $localFile = $request->file('fileInput');//$_FILES["fileInput"]["tmp_name"];
                 $fileHandle = fopen($localFile, "r");
                 
                 curl_setopt($curl, CURLOPT_URL, $uploadFileUrl);
@@ -84,29 +85,33 @@ class FileUploadController extends Controller
                     if ($status_code == 200)
                     {
                         // Read all template texts
-                        $templateText = "";//file_get_contents($_FILES["fileTemplate"]["tmp_name"]);
+                        $templateText = file_get_contents($request->file('fileTemplate'));
 
                         // 3. PARSE UPLOADED PDF DOCUMENT
-                        $this->ParseDocument($apiKey, $uploadedFileUrl, $templateText);
+                        $this->ParseDocument($apiKey, $uploadedFileUrl, $templateText, $fileName = pathinfo($request->file('fileInput')->getClientOriginalName(), PATHINFO_FILENAME));
+                        //return response()->json(['message' => 'OK', 'status' => 200], 200);
                     }
                     else
                     {
                         // Display request error
-                        echo "<p>Status code: " . $status_code . "</p>"; 
-                        echo "<p>" . $result . "</p>"; 
+                        //echo "<p>Status code: " . $status_code . "</p>"; 
+                        //echo "<p>" . $result . "</p>"; 
+                        return response()->json(['message' => $result, 'status' => $status_code], 400);
                     }
                 }
                 else
                 {
                     // Display CURL error
-                    echo "Error: " . curl_error($curl);
+                    //echo "Error: " . curl_error($curl);
+                    return response()->json(['message' => curl_error($curl), 'status' => 400], 400);
                 }
             }
             else
             {
                 // Display service reported error
-                echo "<p>Status code: " . $status_code . "</p>"; 
-                echo "<p>" . $result . "</p>"; 
+                //echo "<p>Status code: " . $status_code . "</p>"; 
+                //echo "<p>" . $result . "</p>"; 
+                return response()->json(['message' => $result, 'status' => $status_code], 400);
             }
             
             curl_close($curl);
@@ -114,13 +119,14 @@ class FileUploadController extends Controller
         else
         {
             // Display CURL error
-            echo "Error: " . curl_error($curl);
+            //echo "Error: " . curl_error($curl);
+            return response()->json(['message' => curl_error($curl), 'status' => 400], 400);
         }
         //return redirect('file-upload.index')->with('status', 'File Has been uploaded successfully in laravel 8');
  
     }
 
-    function ParseDocument($apiKey, $uploadedFileUrl, $templateText) 
+    function ParseDocument($apiKey, $uploadedFileUrl, $templateText, $csvName) 
     {
         // (!) Make asynchronous job
         $async = TRUE;
@@ -182,8 +188,36 @@ class FileUploadController extends Controller
                             
                             //Calls InsertToDb function to get key value pair from JSON file 
                             //$this->InsertToDb($resultFileUrl);
+                            
+                            if (!File::exists(public_path()."/files")) {
+                                File::makeDirectory(public_path() . "/files");
+                            }
                             $jsondata = file_get_contents($resultFileUrl);
-                            print_r($jsondata);
+                            $data = json_decode(preg_replace('/[\x00-\x1F\x80-\xFF]/', '', $jsondata), true);
+                            //echo count($data['objects']);
+                            //dd($data);
+                            // CSV file name                            
+                            
+                            // File pointer in writable mode
+                            $handle = fopen(public_path("files/".$csvName.".csv"), 'w');
+                            $filename =  public_path("files/".$csvName.".csv");
+                            // Traverse through the associative
+                            // array using for each loop
+                            $csvContent = array();
+                            foreach($data['objects'] as $key => $value){
+                                //$csvContent .= $data['objects'][$key]['value']."," ;
+                                array_push($csvContent, $data['objects'][$key]['value']);
+                            }
+                            fputcsv($handle, $csvContent);                            
+                            
+                            // Close the file pointer.
+                            fclose($handle);
+                            //download command
+                            //return Response::download($filename, $csvName.".csv", $headers);
+                            return redirect('file-upload.index')->with('status', 'File Has been parsed successfully <a href="'.url('files').'/'.$csvName.'.csv">'.$csvName.'.csv</a>');
+                            //return response()->json(['message' => $filename, 'status' => 200], 200);
+                            die();
+                            //print_r($jsondata);
                             break;
                         }
                         else if ($status == "working")
@@ -193,7 +227,8 @@ class FileUploadController extends Controller
                         }
                         else 
                         {
-                            echo $status . "<br/>";
+                            //echo $status . "<br/>";
+                            return response()->json(['message' => $status, 'status' => 200], 200);
                             break;
                         }
                     }
@@ -202,20 +237,23 @@ class FileUploadController extends Controller
                 else
                 {
                     // Display service reported error
-                    echo "<p>Error: " . $json["message"] . "</p>"; 
+                    //echo "<p>Error: " . $json["message"] . "</p>"; 
+                    return response()->json(['message' => $json["message"], 'status' => 400], 400);
                 }
             }
             else
             {
                 // Display request error
-                echo "<p>Status code: " . $status_code . "</p>"; 
-                echo "<p>" . $result . "</p>"; 
+                //echo "<p>Status code: " . $status_code . "</p>"; 
+                //echo "<p>" . $result . "</p>"; 
+                return response()->json(['message' => $result, 'status' => $status_code], 400);
             }
         }
         else
         {
             // Display CURL error
-            echo "Error: " . curl_error($curl);
+            //echo "Error: " . curl_error($curl);
+            return response()->json(['message' => curl_error($curl), 'status' => 400], 400);
         }
     }
 

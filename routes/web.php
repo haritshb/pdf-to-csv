@@ -12,9 +12,10 @@ use App\Http\Controllers\FileUploadController;
 | contains the "web" middleware group. Now create something great!
 |
 */
-
+/*
 Route::get('/', function () {
     return view('welcome');
 });
-Route::get('file-upload', [FileUploadController::class, 'index']);
+*/
+Route::get('/', [FileUploadController::class, 'index']); //'file-upload'
 Route::post('store', [FileUploadController::class, 'store']);
